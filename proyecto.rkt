@@ -27,8 +27,8 @@
   '((whitespace (whitespace) skip)
     (comment ("//" (arbno (not #\newline))) skip)
     (text
-     ((or letter  ":" "!" "$" "_" "-" "|" "%" "&" "°" "<" ">" "^" "[" "]")
-      (arbno (or letter digit ":" "!" "$" "_" "-" "|" "%" "&" "°" "<" ">" "^" "[" "]"))) string)
+     ((or letter ":" "!" "$" "_" "-" "|" "%" "&" "°" "<" ">" "^" "[" "]")
+      (arbno (or letter whitespace digit ":" "!" "$" "_" "-" "|" "%" "&" "°" "<" ">" "^" "[" "]"))) string)
     (identifier
       (letter (arbno (or letter digit "_" "-" "?")))
       symbol)
@@ -45,12 +45,9 @@
     (expression
      (primitive "(" (separated-list expression ",") ")")
      primapp-exp)
-;    (expression
-;     ("[" (separated-list expression ",") "]")
-;     list-exp)
-;    (expression
-;     ("[" expression ":" expression "]")
-;     tuple-exp)
+    (expression
+     ("{" (separated-list expression "=" expression ",") "}")
+     register-exp)
     (expression
      ("if" "(" expression ")" "{" expression "}" "else" "{" expression "}")
      if-exp)
@@ -60,7 +57,7 @@
     (expression ("false") false-exp)
     (expression ("true") true-exp)
     (expression
-     ("proc" "(" (separated-list identifier ",") ")" "{" expression "}")
+     ("define" "(" (separated-list identifier ",") ")" "{" expression "}")
      proc-exp)
     (expression
      ("(" expression (arbno expression) ")")
@@ -79,15 +76,30 @@
     (primitive ("+")     add-prim)
     (primitive ("-")     subtract-prim)
     (primitive ("*")     mult-prim)
+    (primitive ("%")     mod-prim)
+    (primitive ("/")     div-prim)
     (primitive ("add1")  incr-prim)
     (primitive ("sub1")  decr-prim)
     (primitive ("zero?") zero-test-prim)
     (primitive ("list") list-prim)
+    (primitive ("tuple") tuple-prim)
     (primitive ("cons") cons-prim)
-    (primitive ("nil")  nil-prim)
+    (primitive ("null")  nil-prim)
     (primitive ("car")  car-prim)
     (primitive ("cdr")  cdr-prim)
     (primitive ("null?") null?-prim)
+    (primitive ("list?") list?-prim)
+    (primitive ("tuple?") pair?-prim)
+    (primitive ("index") list-ref-prim)
+    (primitive ("setList") list-set-prim)
+    (primitive ("concat") concat-prim)
+    (primitive ("append") append-prim)
+    (primitive ("len") len-prim)
+
+    (primitive ("register?") register?-prim)
+    (primitive ("registerRef") register-ref-prim)
+    (primitive ("registerSet") register-set-prim)
+    
     (class-decl                         
      ("class" identifier 
               "(" identifier ")" "{"
@@ -103,7 +115,7 @@
                )
      a-method-decl)
     
-    (expression ("show") mostrar-exp)
+    (expression ("print") mostrar-exp)
 
     (expression 
      ("new" identifier "(" (separated-list expression ",") ")")
@@ -146,63 +158,61 @@
       (text-lit (txt) txt)
       (lit-exp (datum) datum)
       (var-exp (id) (apply-env env id))
-;      (list-exp (rands) (eval-rands rands env))
-;      (tuple-exp (rands) (eval-rands rands env))
       (primapp-exp (prim rands)
-        (let ((args (eval-rands rands env)))
-          (apply-primitive prim args)))
+                   (let ((args (eval-rands rands env)))
+                     (apply-primitive prim args)))
+      (register-exp (ids rands)
+                    (list 'register (eval-rands ids env) (eval-rands rands env)))
       (if-exp (test-exp true-exp false-exp)
-        (if (true-value? (eval-expression test-exp env))
-          (eval-expression true-exp env)
-          (eval-expression false-exp env)))
+              (if (true-value? (eval-expression test-exp env))
+                  (eval-expression true-exp env)
+                  (eval-expression false-exp env)))
       (let-exp (ids rands body)
-        (let ((args (eval-rands rands env)))
-          (eval-expression body (extend-env ids args env))))
+               (let ((args (eval-rands rands env)))
+                 (eval-expression body (extend-env ids args env))))
       (proc-exp (ids body)
-        (closure ids body env))
+                (closure ids body env))
       (app-exp (rator rands)
-        (let ((proc (eval-expression rator env))
-              (args (eval-rands      rands env)))
-          (if (procval? proc)
-            (apply-procval proc args)
-            (eopl:error 'eval-expression 
-              "Attempt to apply non-procedure ~s" proc))))
+               (let ((proc (eval-expression rator env))
+                     (args (eval-rands      rands env)))
+                 (if (procval? proc)
+                     (apply-procval proc args)
+                     (eopl:error 'eval-expression 
+                                 "Attempt to apply non-procedure ~s" proc))))
       (letrec-exp (proc-names idss bodies letrec-body)
-        (eval-expression letrec-body
-          (extend-env-recursively proc-names idss bodies env)))
+                  (eval-expression letrec-body
+                                   (extend-env-recursively proc-names idss bodies env)))
       (true-exp ()
                 #t)
       (false-exp ()
                  #f)
       (varassign-exp (id rhs-exp)
-        (setref!
-          (apply-env-ref env id)
-          (eval-expression rhs-exp env))
-        1)
-;&
+                     (setref!
+                      (apply-env-ref env id)
+                      (eval-expression rhs-exp env))
+                     1)
       (begin-exp (exp1 exps)
-        (let loop ((acc (eval-expression exp1 env))
-                   (exps exps))
-          (if (null? exps) acc
-            (loop (eval-expression (car exps) env) (cdr exps)))))
-;^;;;;;;;;;;;;;;; begin new cases for chap 5 ;;;;;;;;;;;;;;;;
+                 (let loop ((acc (eval-expression exp1 env))
+                            (exps exps))
+                   (if (null? exps) acc
+                       (loop (eval-expression (car exps) env) (cdr exps)))))
       (new-object-exp (class-name rands)
-        (let ((args (eval-rands rands env))
-              (obj (new-object class-name)))
-          (find-method-and-apply
-            'initialize class-name obj args)
-          obj))
+                      (let ((args (eval-rands rands env))
+                            (obj (new-object class-name)))
+                        (find-method-and-apply
+                         'initialize class-name obj args)
+                        obj))
       (method-app-exp (obj-exp method-name rands)
-        (let ((args (eval-rands rands env))
-              (obj (eval-expression obj-exp env)))
-          (find-method-and-apply
-            method-name (object->class-name obj) obj args)))
+                      (let ((args (eval-rands rands env))
+                            (obj (eval-expression obj-exp env)))
+                        (find-method-and-apply
+                         method-name (object->class-name obj) obj args)))
       (super-call-exp (method-name rands)
-        (let ((args (eval-rands rands env))
-              (obj (apply-env env 'self)))
-          (find-method-and-apply
-            method-name (apply-env env '%super) obj args)))
-;^;;;;;;;;;;;;;;; end new cases for chap 5 ;;;;;;;;;;;;;;;;
+                      (let ((args (eval-rands rands env))
+                            (obj (apply-env env 'self)))
+                        (find-method-and-apply
+                         method-name (apply-env env '%super) obj args)))
+      ;^;;;;;;;;;;;;;;; end new cases for chap 5 ;;;;;;;;;;;;;;;;
       )))
       
 
@@ -218,15 +228,47 @@
       (add-prim  () (+ (car args) (cadr args)))
       (subtract-prim () (- (car args) (cadr args)))
       (mult-prim  () (* (car args) (cadr args)))
+      (mod-prim  () (modulo (car args) (cadr args)))
+      (div-prim  () (/ (car args) (cadr args)))
       (incr-prim  () (+ (car args) 1))
       (decr-prim  () (- (car args) 1))
-      (zero-test-prim () (if (zero? (car args)) 1 0))
-      (list-prim () args)               ;already a list
+      (zero-test-prim () (if (zero? (car args)) #t #f))
+      (list-prim () args)
+      (tuple-prim () (cons 'tuple args))
       (nil-prim () '())
-      (car-prim () (car (car args)))
-      (cdr-prim () (cdr (car args)))
-      (cons-prim () (cons (car args) (cadr args)))
-      (null?-prim () (if (null? (car args)) 1 0))
+      (car-prim () (if
+                    (equal? (car (car args)) 'tuple)
+                    (cadr (car args))
+                    (if (not (equal? (car (car args)) 'register))
+                        (car (car args))
+                        (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure"))))
+      (cdr-prim () (if
+                    (equal? (car (car args)) 'tuple)
+                    (cons 'tuple (cddr (car args)))
+                    (if (not (equal? (car (car args)) 'register))
+                        (cdr (car args))
+                        (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure"))))
+      (cons-prim () (if
+                     (not (or (equal? (car (car args)) 'tuple) (equal? (car (car args)) 'register) (equal? (car (cadr args)) 'tuple) (equal? (car (cadr args)) 'register)))
+                     (cons (car args) (cadr args))
+                     (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure")))
+      (null?-prim () (if
+                      (equal? (car (car args)) 'tuple)
+                      (if (null? (cadr (car args))) #t #f)
+                      (if (not (equal? (car (car args)) 'register))
+                          (if (null? (car args)) #t #f)
+                          (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure"))))
+      (list?-prim () (if (list? (car args)) #t #f))
+      (pair?-prim () (if (pair? (car args)) #t #f))
+      (list-ref-prim () (list-ref (car args) (cadr args)))
+      (list-set-prim () (list-set (car args) (cadr args) (caddr args)))
+      (concat-prim () (string-append (car args) (cadr args)))
+      (len-prim () (if (list? (car args)) (length (car args)) (string-length (car args))))
+      (append-prim () (append (car args) (cadr args)))
+
+      (register?-prim () (if (equal? (car (car args)) 'register) #t #f))
+      (register-ref-prim () (list-ref (caddr (car args)) (register-ref (cadr (car args)) 0 (cadr args))))
+      (register-set-prim () (list 'register (cadr (car args)) (list-set (caddr (car args)) (register-ref (cadr (car args)) 0 (cadr args)) (caddr args))))
       )))
 
 (define init-env 
@@ -236,11 +278,27 @@
       '(1 5 10)
       (empty-env))))
 
+(define list-set
+  (lambda (L n x)
+    (if (null? L)
+        '()
+        (if (eqv? n 0)
+            (cons x (cdr L))
+            (cons (car L) (list-set (cdr L) (- n 1) x))))))
+
+(define register-ref
+  (lambda (L n x)
+    (if (null? L)
+        -1
+        (if (eqv? (car L) x)
+            n
+            (register-ref (cdr L) (+ n 1) x)))))
+
 ;^;;;;;;;;;;;;;;; booleans ;;;;;;;;;;;;;;;;
 
 (define true-value?
   (lambda (x)
-    (not (zero? x))))
+    (if (number? x) (not (zero? x)) (equal? x #t))))
 
 
 ;;;;;;;;;;;;;;;; declarations ;;;;;;;;;;;;;;;;
@@ -329,7 +387,7 @@
   (empty-env-record)
   (extended-env-record
     (syms (list-of symbol?))
-    (vec vector?)              ; can use this for anything.
+    (vec vector?)
     (env environment?))
   )
 
