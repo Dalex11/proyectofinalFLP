@@ -26,6 +26,9 @@
 (define the-lexical-spec
   '((whitespace (whitespace) skip)
     (comment ("//" (arbno (not #\newline))) skip)
+    (text
+     ((or letter  ":" "!" "$" "_" "-" "|" "%" "&" "°" "<" ">" "^" "[" "]")
+      (arbno (or letter digit ":" "!" "$" "_" "-" "|" "%" "&" "°" "<" ">" "^" "[" "]"))) string)
     (identifier
       (letter (arbno (or letter digit "_" "-" "?")))
       symbol)
@@ -40,29 +43,38 @@
     (expression (number) lit-exp)
     (expression (identifier) var-exp)   
     (expression
-      (primitive "(" (separated-list expression ",") ")")
-      primapp-exp)
+     (primitive "(" (separated-list expression ",") ")")
+     primapp-exp)
+;    (expression
+;     ("[" (separated-list expression ",") "]")
+;     list-exp)
+;    (expression
+;     ("[" expression ":" expression "]")
+;     tuple-exp)
     (expression
-      ("if" "(" expression ")" "{" expression "}" "else" "{" expression "}")
-      if-exp)
-   (expression
-      ("let" "(" (arbno identifier "=" expression ";") ")" "{" expression "}")
-      let-exp)
+     ("if" "(" expression ")" "{" expression "}" "else" "{" expression "}")
+     if-exp)
     (expression
-      ("proc" "(" (separated-list identifier ",") ")" "{" expression "}")
-      proc-exp)
+     ("let" "(" (arbno identifier "=" expression ";") ")" "{" expression "}")
+     let-exp)
+    (expression ("false") false-exp)
+    (expression ("true") true-exp)
     (expression
-      ("(" expression (arbno expression) ")")
-      app-exp)
+     ("proc" "(" (separated-list identifier ",") ")" "{" expression "}")
+     proc-exp)
+    (expression
+     ("(" expression (arbno expression) ")")
+     app-exp)
     (expression                         
-      ("letrec"
-        "(" (arbno identifier "(" (separated-list identifier ",") ")"
-          "=" expression ";") ")" "{" expression "}")
-      letrec-exp)
+     ("letrec"
+      "(" (arbno identifier "(" (separated-list identifier ",") ")"
+                 "=" expression ";") ")" "{" expression "}")
+     letrec-exp)
+    (expression ("\"" text "\"") text-lit)
     (expression ("set" identifier "=" expression) varassign-exp)
     (expression
-      ("begin" "{" expression (arbno "," expression) "}")
-      begin-exp)
+     ("begin" "{" expression (arbno "," expression) "}")
+     begin-exp)
 
     (primitive ("+")     add-prim)
     (primitive ("-")     subtract-prim)
@@ -76,41 +88,35 @@
     (primitive ("car")  car-prim)
     (primitive ("cdr")  cdr-prim)
     (primitive ("null?") null?-prim)
-
-;^;;;;;;;;;;;;;;; new productions for oop ;;;;;;;;;;;;;;;;
-
     (class-decl                         
-      ("class" identifier 
-        "(" identifier ")" "{"
-         (arbno "private" identifier)
-         (arbno method-decl) "}"
-         )
-      a-class-decl)
+     ("class" identifier 
+              "(" identifier ")" "{"
+              (arbno "private" identifier)
+              (arbno method-decl) "}"
+              )
+     a-class-decl)
 
     (method-decl
-      ("define" identifier 
-        "("  (separated-list identifier ",") ")"
-        "{" expression "}"
-        )
-      a-method-decl)
+     ("define" identifier 
+               "("  (separated-list identifier ",") ")"
+               "{" expression "}"
+               )
+     a-method-decl)
     
-    (expression ("mostrar") mostrar-exp)
+    (expression ("show") mostrar-exp)
 
     (expression 
-      ("new" identifier "(" (separated-list expression ",") ")")
-      new-object-exp)
+     ("new" identifier "(" (separated-list expression ",") ")")
+     new-object-exp)
 
     (expression
-      ("send" expression identifier
-        "("  (separated-list expression ",") ")")
-      method-app-exp)
+     ("send" expression identifier
+             "("  (separated-list expression ",") ")")
+     method-app-exp)
 
     (expression                                
-      ("super" identifier    "("  (separated-list expression ",") ")")
-      super-call-exp)
-
-;^;;;;;;;;;;;;;;; end new productions for oop ;;;;;;;;;;;;;;;;
-
+     ("super" identifier    "("  (separated-list expression ",") ")")
+     super-call-exp)
     ))
 
 (sllgen:make-define-datatypes the-lexical-spec the-grammar)
@@ -130,15 +136,18 @@
   (lambda (pgm)
     (cases program pgm
       (a-program (c-decls exp)
-        (elaborate-class-decls! c-decls) ;\new1
+        (elaborate-class-decls! c-decls)
         (eval-expression exp (empty-env))))))
 
 (define eval-expression
   (lambda (exp env)
     (cases expression exp
       (mostrar-exp () the-class-env)
+      (text-lit (txt) txt)
       (lit-exp (datum) datum)
       (var-exp (id) (apply-env env id))
+;      (list-exp (rands) (eval-rands rands env))
+;      (tuple-exp (rands) (eval-rands rands env))
       (primapp-exp (prim rands)
         (let ((args (eval-rands rands env)))
           (apply-primitive prim args)))
@@ -161,6 +170,10 @@
       (letrec-exp (proc-names idss bodies letrec-body)
         (eval-expression letrec-body
           (extend-env-recursively proc-names idss bodies env)))
+      (true-exp ()
+                #t)
+      (false-exp ()
+                 #f)
       (varassign-exp (id rhs-exp)
         (setref!
           (apply-env-ref env id)
