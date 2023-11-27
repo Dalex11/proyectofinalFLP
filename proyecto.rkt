@@ -301,13 +301,34 @@
                       (if (not (equal? (car (car args)) 'register))
                           (if (null? (car args)) #t #f)
                           (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure"))))
-      (list?-prim () (if (list? (car args)) #t #f))
-      (pair?-prim () (if (pair? (car args)) #t #f))
-      (list-ref-prim () (list-ref (car args) (cadr args)))
-      (list-set-prim () (list-set (car args) (cadr args) (caddr args)))
-      (concat-prim () (string-append (car args) (cadr args)))
-      (len-prim () (if (list? (car args)) (length (car args)) (string-length (car args))))
-      (append-prim () (append (car args) (cadr args)))
+      (list?-prim () (if
+                      (not (or (equal? (car (car args)) 'tuple) (equal? (car (car args)) 'register)))
+                      #t
+                      #f))
+      (pair?-prim () (if (equal? (car (car args)) 'tuple) #t #f))
+      (list-ref-prim () (if
+                         (equal? (car (car args)) 'tuple)
+                         (list-ref (cadr (car args)) (cadr args))
+                         (if
+                          (not (equal? (car (car args)) 'tuple))
+                          (list-ref (car args) (cadr args))
+                          (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure"))))
+      (list-set-prim () (if
+                         (not (or (equal? (car (car args)) 'tuple) (equal? (car (car args)) 'register)))
+                         (list-set (car args) (cadr args) (caddr args))
+                         (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure")))
+      (concat-prim () (if
+                       (not (or (equal? (car (car args)) 'tuple) (equal? (car (car args)) 'register)))
+                       (string-append (car args) (cadr args))
+                       (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure")))
+      (len-prim () (if
+                       (not (or (equal? (car (car args)) 'tuple) (equal? (car (car args)) 'register)))
+                       (if (list? (car args)) (length (car args)) (string-length (car args)))
+                       (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure")))
+      (append-prim () (if
+                       (not (or (equal? (car (car args)) 'tuple) (equal? (car (car args)) 'register)))
+                       (append (car args) (cadr args))
+                       (eopl:error 'apply-primitive "Attempt to apply a register in a non-register procedure")))
 
       (register?-prim () (if (equal? (car (car args)) 'register) #t #f))
       (register-ref-prim () (list-ref (caddr (car args)) (register-ref (cadr (car args)) 0 (cadr args))))
